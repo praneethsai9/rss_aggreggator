@@ -1,6 +1,7 @@
 package main
 
 import (
+	"database/sql"
 	"fmt"
 	"log"
 	"net/http"
@@ -9,7 +10,13 @@ import (
 	"github.com/go-chi/chi"
 	"github.com/go-chi/cors"
 	"github.com/joho/godotenv"
+	_ "github.com/lib/pq"
+	"github.com/praneethsai9/rss_aggregator/internal/database"
 )
+
+type apiConfig struct {
+	DB *database.Queries
+}
 
 func main() {
 	fmt.Println("Hi")
@@ -20,7 +27,20 @@ func main() {
 	if portString == "" {
 		log.Fatal("PORT is not found in env")
 	}
+	dbURL := os.Getenv("DB_URL")
+	if dbURL == "" {
+		log.Fatal("dbURL is not found in env")
+	}
 	router := chi.NewRouter()
+
+	conn, err := sql.Open("postgres", dbURL)
+	if err != nil {
+		log.Fatal("can't connect to database", err)
+	}
+
+	apiCfg := apiConfig{
+		DB: database.New(conn),
+	}
 
 	router.Use(cors.Handler(cors.Options{
 		AllowedOrigins:   []string{"https://*", "http://*"},
@@ -36,6 +56,10 @@ func main() {
 	v1Router.Get("/ready", handlerReadiness)
 	router.Mount("/v1", v1Router)
 	v1Router.Get("/err", handlerErr)
+	v1Router.Post("/users", apiCfg.handlerCreateUser)
+	v1Router.Get("/users", apiCfg.middlewareAuth(apiCfg.handlerGetUser))
+	v1Router.Post("/feeds", apiCfg.middlewareAuth(apiCfg.handlerCreateFeed))
+	v1Router.Get("/feeds", apiCfg.handlerGetFeeds)
 
 	srv := &http.Server{
 
@@ -43,7 +67,7 @@ func main() {
 		Addr:    ":" + portString,
 	}
 	log.Printf("Server starting on PORT %v", portString)
-	err := srv.ListenAndServe()
+	err = srv.ListenAndServe()
 	if err != nil {
 		log.Fatal(err)
 	}
